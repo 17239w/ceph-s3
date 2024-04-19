@@ -1,0 +1,15 @@
+aws:
+  s3:
+    accessKey: wwjaccess
+    secretKey: wwjsecret
+    url: http://124.221.171.162:7480
+    bucket: test
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+server:
+  port: 8082
