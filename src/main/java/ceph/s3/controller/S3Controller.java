@@ -2,6 +2,7 @@ package ceph.s3.controller;
 
 
 import ceph.s3.file.util.AwzS3Util;
+import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -65,6 +66,24 @@ public class S3Controller {
         }
     }
 
+    @PostMapping(value = "/uploadOneBlock")
+    public ResponseEntity uploadOneBlock(@RequestParam("file") MultipartFile file,
+                                         @RequestParam("bucket") String bucket,
+                                         @RequestParam("position") int position,
+                                         @RequestParam("blockSize") long blockSize) {
+        try {
+            String uploadedKey = AwzS3Util.uploadOneBlock(file, position, blockSize, bucket);
+            if (uploadedKey != null) {
+                return new ResponseEntity<>("上传成功，Key：" + uploadedKey, HttpStatus.OK);
+            } else {
+                return new ResponseEntity<>("上传失败!", HttpStatus.INTERNAL_SERVER_ERROR);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new ResponseEntity<>("上传失败!", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
     @PostMapping("/deleteFile")
     public ResponseEntity<String> deleteFile(@RequestParam("bucket") String bucket, @RequestParam("fileName") String fileName) {
         try {
@@ -97,4 +116,23 @@ public class S3Controller {
     public ObjectMetadata getFileInfo(String bucket, String fileName) {
         return AwzS3Util.getFileInfo(bucket, fileName);
     }
+
+    @PostMapping(value = "/decompressAndUpload")
+    public ResponseEntity<String> decompressAndUploadFile(
+            @RequestParam String sourceBucket,
+            @RequestParam String sourceKey,
+            @RequestParam String targetBucket) {
+        try {
+            boolean result = AwzS3Util.decompressAndUpload(sourceBucket, sourceKey, targetBucket);
+            if (result) {
+                return ResponseEntity.ok("文件成功解压并上传到目标桶！");
+            } else {
+                return ResponseEntity.internalServerError().body("文件解压并上传失败！");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().body("服务器内部错误：" + e.getMessage());
+        }
+    }
+
 }
