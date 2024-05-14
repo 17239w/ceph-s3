@@ -2,6 +2,7 @@ package ceph.s3.controller;
 
 
 import ceph.s3.file.util.AwzS3Util;
+import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -56,6 +57,24 @@ public class S3Controller {
             boolean uploadSuccess = AwzS3Util.uploadByBlock(file, bucket);
             if (uploadSuccess) {
                 return new ResponseEntity<>("上传成功!", HttpStatus.OK);
+            } else {
+                return new ResponseEntity<>("上传失败!", HttpStatus.INTERNAL_SERVER_ERROR);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new ResponseEntity<>("上传失败!", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @PostMapping(value = "/uploadOneBlock")
+    public ResponseEntity uploadOneBlock(@RequestParam("file") MultipartFile file,
+                                         @RequestParam("bucket") String bucket,
+                                         @RequestParam("position") int position,
+                                         @RequestParam("blockSize") long blockSize) {
+        try {
+            String uploadedKey = AwzS3Util.uploadOneBlock(file, position, blockSize, bucket);
+            if (uploadedKey != null) {
+                return new ResponseEntity<>("上传成功，Key：" + uploadedKey, HttpStatus.OK);
             } else {
                 return new ResponseEntity<>("上传失败!", HttpStatus.INTERNAL_SERVER_ERROR);
             }

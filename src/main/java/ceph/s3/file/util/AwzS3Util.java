@@ -1,5 +1,6 @@
 package ceph.s3.file.util;
 
+import com.amazonaws.AmazonServiceException;
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.Protocol;
 import com.amazonaws.SdkClientException;
@@ -149,6 +150,55 @@ public class AwzS3Util {
         }
         return true;
     }
+
+    public static String uploadOneBlock(MultipartFile file, int position, long blockSize, String bucket) {
+        // 检查文件是否为空，如果为空，则返回错误信息
+        if (Objects.isNull(file)) {
+            return "文件为空";
+        }
+        // 获取文件名
+        String fileName = file.getOriginalFilename();
+        // 初始化分段上传请求
+        InitiateMultipartUploadRequest initiateRequest = new InitiateMultipartUploadRequest(bucket, fileName);
+        // 发起分段上传，并获取初始化结果
+        InitiateMultipartUploadResult initiateResult = amazonS3.initiateMultipartUpload(initiateRequest);
+        // 获取文件大小
+        long contentLength = file.getSize();
+        // 计算分段的起始位置和结束位置
+        long start = position * blockSize;
+        long end = Math.min((position + 1) * blockSize, contentLength);
+        // 计算分段大小
+        long partSize = end - start;
+        // 用于存储分段的 ETag
+        PartETag partETag = null;
+        try (InputStream inputStream = file.getInputStream()) {
+            // 跳过文件中前面的数据到指定的起始位置
+            inputStream.skip(start);
+            // 读取分段数据
+            byte[] partData = new byte[(int) partSize];
+            int bytesRead = inputStream.read(partData);
+            // 创建分段上传请求
+            UploadPartRequest uploadRequest = new UploadPartRequest()
+                    .withBucketName(bucket)
+                    .withKey(fileName)
+                    .withUploadId(initiateResult.getUploadId())
+                    .withPartNumber(position + 1)
+                    .withPartSize(partSize)
+                    .withInputStream(new ByteArrayInputStream(partData));
+            // 上传分段并获取结果
+            UploadPartResult uploadResult = amazonS3.uploadPart(uploadRequest);
+            partETag = uploadResult.getPartETag();
+            // 完成分段上传请求
+            CompleteMultipartUploadRequest completeRequest = new CompleteMultipartUploadRequest(bucket, fileName, initiateResult.getUploadId(), List.of(partETag));
+            CompleteMultipartUploadResult completeResult = amazonS3.completeMultipartUpload(completeRequest);
+            return completeResult.getKey();
+        } catch (IOException | AmazonServiceException e) {
+            // 处理异常
+            e.printStackTrace();
+            return e.getMessage();
+        }
+    }
+
 
     public static ResponseEntity<byte[]> downloadByName(String bucket, String fileName) throws IOException {
         // 检查存储桶名称是否为空，如果为空，则抛出异常
