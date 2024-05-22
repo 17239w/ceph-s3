@@ -2,15 +2,15 @@ package ceph.s3.controller;
 
 
 import ceph.s3.file.util.AwzS3Util;
-import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
 
 
 @RestController
@@ -34,7 +34,7 @@ public class S3Controller {
         }
     }
 
-    @PostMapping("/deleteBucket")
+    @DeleteMapping("/deleteBucket")
     public ResponseEntity<String> deleteBucket(@RequestParam("bucket") String bucket) {
         try {
             boolean deleted = AwzS3Util.deleteBucket(bucket);
@@ -84,7 +84,7 @@ public class S3Controller {
         }
     }
 
-    @PostMapping("/deleteFile")
+    @DeleteMapping("/deleteFile")
     public ResponseEntity<String> deleteFile(@RequestParam("bucket") String bucket, @RequestParam("fileName") String fileName) {
         try {
             boolean deleteSuccess = AwzS3Util.deleteFile(bucket, fileName);
@@ -102,17 +102,17 @@ public class S3Controller {
     }
 
     @PostMapping(value = "/downloadObject")
-    public ResponseEntity downloadObject(String bucket, String fileName) {
+    public ResponseEntity downloadObject(String bucket, String fileName,String localPath) {
         ResponseEntity<byte[]> download = null;
         try {
-            download = AwzS3Util.downloadByName(bucket, fileName);
+            download = AwzS3Util.downloadByName(bucket, fileName,localPath);
         } catch (Exception e) {
             e.printStackTrace();
         }
         return download;
     }
 
-    @PostMapping(value = "/getFileInfo")
+    @GetMapping(value = "/getFileInfo")
     public ObjectMetadata getFileInfo(String bucket, String fileName) {
         return AwzS3Util.getFileInfo(bucket, fileName);
     }
@@ -132,6 +132,19 @@ public class S3Controller {
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.internalServerError().body("服务器内部错误：" + e.getMessage());
+        }
+    }
+
+    @GetMapping("/extractFirstFrame")
+    public ResponseEntity<byte[]> getFirstFrame(@RequestParam String bucket,
+                                                @RequestParam String fileName,
+                                                @RequestParam String localPath) {
+        try {
+            byte[] frame = AwzS3Util.extractFirstFrame(bucket, fileName, localPath);
+            return ResponseEntity.ok().body(frame);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().body(("Failed to get first frame: " + e.getMessage()).getBytes());
         }
     }
 

@@ -25,13 +25,16 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 @Component
 public class AwzS3Util {
@@ -200,32 +203,32 @@ public class AwzS3Util {
     }
 
 
-    public static ResponseEntity<byte[]> downloadByName(String bucket, String fileName) throws IOException {
-        // 检查存储桶名称是否为空，如果为空，则抛出异常
-        if (StringUtils.isNullOrEmpty(bucket)) {
+    public static ResponseEntity<byte[]> downloadByName(String bucket, String fileName, String localPath) throws IOException {
+        if (!StringUtils.hasValue(bucket)) {
             throw new IllegalArgumentException("存储桶名称不能为空!");
         }
-        // 如果未指定存储桶，则使用默认存储桶
-        bucket = StringUtils.isNullOrEmpty(bucket) ? awzS3Config.getBucket() : bucket;
-        // 创建获取对象请求
+
+        bucket = !StringUtils.hasValue(bucket) ? awzS3Config.getBucket() : bucket;
+
         GetObjectRequest getObjectRequest = new GetObjectRequest(bucket, fileName);
-        // 从 Amazon S3 中获取对象
         S3Object s3Object = amazonS3.getObject(getObjectRequest);
-        // 获取对象的输入流
         S3ObjectInputStream objectInputStream = s3Object.getObjectContent();
-        // 将输入流转换为字节数组
         byte[] bytes = IOUtils.toByteArray(objectInputStream);
-        // 对文件名进行 URL 编码，并替换空格为 %20
+        // 检查并创建本地路径
+        if (!Files.exists(Paths.get(localPath))) {
+            Files.createDirectories(Paths.get(localPath));
+        }
+        // 保存文件到本地路径
+        try (FileOutputStream fos = new FileOutputStream(localPath + "/" + fileName)) {
+            fos.write(bytes);
+        }
+
         String showFileName = URLEncoder.encode(fileName, "UTF-8").replaceAll("\\+", "%20");
-        // 设置 HTTP 头信息
         HttpHeaders httpHeaders = new HttpHeaders();
-        // 设置内容类型为二进制流
         httpHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-        // 设置内容长度
         httpHeaders.setContentLength(bytes.length);
-        // 设置文件下载时的文件名，并指定为附件
         httpHeaders.setContentDispositionFormData("attachment", showFileName);
-        // 返回带有字节数组、HTTP 头和状态码的 ResponseEntity 对象
+
         return new ResponseEntity<>(bytes, httpHeaders, HttpStatus.OK);
     }
 
@@ -261,5 +264,69 @@ public class AwzS3Util {
         }
         // 返回对象的元数据信息
         return objectMetadata;
+    }
+
+    //解压缩sourceBucket里的sourceKey文件，并将解压缩后的文件上传到targetBucket
+    public static boolean decompressAndUpload(String sourceBucket, String sourceKey, String targetBucket) {
+        try {
+            // 从S3获取压缩文件
+            S3Object s3object = amazonS3.getObject(new GetObjectRequest(sourceBucket, sourceKey));
+            ZipInputStream zis = new ZipInputStream(new BufferedInputStream(s3object.getObjectContent()), Charset.forName("GBK"));
+            ZipEntry entry;
+
+            while ((entry = zis.getNextEntry()) != null) {
+                String fileName = entry.getName();
+                File tempFile = File.createTempFile("decompressed_", fileName);
+
+                // 解压缩文件内容到临时文件
+                try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                    byte[] buffer = new byte[1024];
+                    int len;
+                    while ((len = zis.read(buffer)) > 0) {
+                        fos.write(buffer, 0, len);
+                    }
+                }
+
+                // 上传解压后的文件到目标存储桶
+                amazonS3.putObject(targetBucket, fileName, new FileInputStream(tempFile).toString());
+                tempFile.delete(); // 删除临时文件
+            }
+            zis.close();
+            return true;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    //读取视频的前3秒，截取第一帧，返回第一帧的图片(同步)
+    public static byte[] extractFirstFrame(String bucket, String fileName, String localPath) throws IOException {
+        downloadByName(bucket, fileName, localPath);
+        // 本地视频文件路径
+        String videoFilePath = localPath + "/" + fileName;
+        // 提取视频文件名前缀
+        String filePrefix = fileName.substring(0, fileName.lastIndexOf('.'));
+        String outputImagePath = localPath + "/" + filePrefix + ".jpg";
+        // 使用 ffmpeg 只读取前3秒并截取第一帧
+        ProcessBuilder processBuilder = new ProcessBuilder(
+                "ffmpeg", "-i", videoFilePath, "-t", "00:00:03", "-ss", "00:00:01", "-vframes", "1", outputImagePath);
+        processBuilder.redirectErrorStream(true);
+        Process process = processBuilder.start();
+        try {
+            if (process.waitFor() != 0) {
+                throw new IOException("ffmpeg process failed");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("ffmpeg process was interrupted", e);
+        }
+        // 读取截取的第一帧图片
+        byte[] imageBytes = Files.readAllBytes(Paths.get(outputImagePath));
+        // 删除临时文件
+        new File(videoFilePath).delete();
+        //如果注释掉下面一行代码，那么localPath目录下的第一帧截图会被保留到本地
+        //new File(outputImagePath).delete();
+
+        return imageBytes;
     }
 }
