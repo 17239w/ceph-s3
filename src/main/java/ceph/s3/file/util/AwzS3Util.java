@@ -12,7 +12,6 @@ import com.amazonaws.client.builder.AwsClientBuilder;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.*;
 import com.amazonaws.util.IOUtils;
 import com.amazonaws.util.StringUtils;
@@ -26,14 +25,13 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URLEncoder;
-import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 @Component
 public class AwzS3Util {
@@ -201,6 +199,7 @@ public class AwzS3Util {
         }
     }
 
+
     public static ResponseEntity<byte[]> downloadByName(String bucket, String fileName) throws IOException {
         // 检查存储桶名称是否为空，如果为空，则抛出异常
         if (StringUtils.isNullOrEmpty(bucket)) {
@@ -262,37 +261,5 @@ public class AwzS3Util {
         }
         // 返回对象的元数据信息
         return objectMetadata;
-    }
-
-    public static boolean decompressAndUpload(String sourceBucket, String sourceKey, String targetBucket) {
-        try {
-            // 从S3获取压缩文件
-            S3Object s3object = amazonS3.getObject(new GetObjectRequest(sourceBucket, sourceKey));
-            ZipInputStream zis = new ZipInputStream(new BufferedInputStream(s3object.getObjectContent()), Charset.forName("GBK"));
-            ZipEntry entry;
-
-            while ((entry = zis.getNextEntry()) != null) {
-                String fileName = entry.getName();
-                File tempFile = File.createTempFile("decompressed_", fileName);
-
-                // 解压缩文件内容到临时文件
-                try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                    byte[] buffer = new byte[1024];
-                    int len;
-                    while ((len = zis.read(buffer)) > 0) {
-                        fos.write(buffer, 0, len);
-                    }
-                }
-
-                // 上传解压后的文件到目标存储桶
-                amazonS3.putObject(targetBucket, fileName, new FileInputStream(tempFile).toString());
-                tempFile.delete(); // 删除临时文件
-            }
-            zis.close();
-            return true;
-        } catch (IOException e) {
-            e.printStackTrace();
-            return false;
-        }
     }
 }
