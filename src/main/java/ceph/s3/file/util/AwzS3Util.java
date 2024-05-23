@@ -202,7 +202,6 @@ public class AwzS3Util {
         }
     }
 
-
     public static ResponseEntity<byte[]> downloadByName(String bucket, String fileName, String localPath) throws IOException {
         if (!StringUtils.hasValue(bucket)) {
             throw new IllegalArgumentException("存储桶名称不能为空!");
@@ -299,17 +298,18 @@ public class AwzS3Util {
         }
     }
 
-    //读取视频的前3秒，截取第一帧，返回第一帧的图片(同步)
+    //读取视频的前1秒，截取第一帧，返回第一帧的图片(第一帧对应第0秒)
     public static byte[] extractFirstFrame(String bucket, String fileName, String localPath) throws IOException {
-        downloadByName(bucket, fileName, localPath);
+        //只下载视频前1秒到本地
+        downloadInRange(bucket, fileName, localPath);
         // 本地视频文件路径
         String videoFilePath = localPath + "/" + fileName;
         // 提取视频文件名前缀
         String filePrefix = fileName.substring(0, fileName.lastIndexOf('.'));
         String outputImagePath = localPath + "/" + filePrefix + ".jpg";
-        // 使用 ffmpeg 只读取前3秒并截取第一帧
+        // 使用 ffmpeg 只读取前1秒并截取第一帧
         ProcessBuilder processBuilder = new ProcessBuilder(
-                "ffmpeg", "-i", videoFilePath, "-t", "00:00:03", "-ss", "00:00:01", "-vframes", "1", outputImagePath);
+                "ffmpeg", "-i", videoFilePath, "-t", "00:00:01", "-ss", "00:00:01", "-vframes", "1", outputImagePath);
         processBuilder.redirectErrorStream(true);
         Process process = processBuilder.start();
         try {
@@ -326,7 +326,63 @@ public class AwzS3Util {
         new File(videoFilePath).delete();
         //如果注释掉下面一行代码，那么localPath目录下的第一帧截图会被保留到本地
         //new File(outputImagePath).delete();
-
         return imageBytes;
+    }
+    //范围下载
+    public static ResponseEntity<byte[]> downloadInRange(String bucket, String fileName, String localPath) throws IOException {
+        if (!StringUtils.hasValue(bucket)) {
+            throw new IllegalArgumentException("存储桶名称不能为空!");
+        }
+        bucket = !StringUtils.hasValue(bucket) ? awzS3Config.getBucket() : bucket;
+        // 从 S3 获取对象
+        GetObjectRequest getObjectRequest = new GetObjectRequest(bucket, fileName);
+        S3Object s3Object = amazonS3.getObject(getObjectRequest);
+        S3ObjectInputStream objectInputStream = s3Object.getObjectContent();
+        // 创建临时文件来存储从 S3 下载的对象
+        File tempFile = File.createTempFile("s3object-", ".tmp");
+        try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+            IOUtils.copy(objectInputStream, fos);
+        }
+        // 使用 ffmpeg 下载前1秒视频
+        String tempFilePath = tempFile.getAbsolutePath();
+        String outputFilePath = localPath + "/" + fileName;
+        ProcessBuilder processBuilder = new ProcessBuilder(
+                "ffmpeg", "-ss", "0", "-i", tempFilePath, "-t", "1", "-c", "copy", outputFilePath);
+        processBuilder.redirectErrorStream(true);
+        Process process = processBuilder.start();
+        // 捕获 ffmpeg 进程的输出日志
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append("\n");
+            }
+        }
+        try {
+            if (process.waitFor() != 0) {
+                throw new IOException("ffmpeg process failed: " + output.toString());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("ffmpeg process was interrupted: " + output.toString(), e);
+        }
+        // 读取截取的前1秒视频
+        byte[] bytes = Files.readAllBytes(Paths.get(outputFilePath));
+        // 删除临时文件
+        Files.delete(Paths.get(tempFilePath));
+        // 检查并创建本地路径
+        if (!Files.exists(Paths.get(localPath))) {
+            Files.createDirectories(Paths.get(localPath));
+        }
+        // 保存文件到本地路径
+        try (FileOutputStream fos = new FileOutputStream(outputFilePath)) {
+            fos.write(bytes);
+        }
+        String showFileName = URLEncoder.encode(fileName, "UTF-8").replaceAll("\\+", "%20");
+        HttpHeaders httpHeaders = new HttpHeaders();
+        httpHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        httpHeaders.setContentLength(bytes.length);
+        httpHeaders.setContentDispositionFormData("attachment", showFileName);
+        return new ResponseEntity<>(bytes, httpHeaders, HttpStatus.OK);
     }
 }
